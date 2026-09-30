@@ -1,7 +1,7 @@
 `timescale 1 ns / 1 ps
 
 //==========================================================//
-//            TESTBENCH - X25519 FADD                      //
+//              TESTBENCH - X25519 FSUB                    //
 //==========================================================//
 
 module tb_FSub_25519;
@@ -15,11 +15,11 @@ module tb_FSub_25519;
     localparam logic [255:0] FIELD_P =
         256'h7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFED;
 
-    localparam int NUM_RANDOM = 100;
+    localparam int NUM_RANDOM = 1000;
 
 
     //======================================================//
-    //                 DUT SIGNALS                          //
+    //                  DUT SIGNALS                         //
     //======================================================//
 
     logic clk_i;
@@ -46,7 +46,7 @@ module tb_FSub_25519;
 
 
     //======================================================//
-    //               SOURCE OPERANDS                        //
+    //              SOURCE OPERANDS                         //
     //======================================================//
 
     logic [255:0] operand_a_source;
@@ -54,23 +54,23 @@ module tb_FSub_25519;
 
 
     //======================================================//
-    //               TEST COUNTERS                          //
+    //                TEST COUNTERS                         //
     //======================================================//
 
     integer test_count;
     integer pass_count;
     integer fail_count;
 
-    integer sum_lt_p_count;
-    integer sum_eq_p_count;
-    integer sum_gt_p_count;
+    integer a_gt_b_count;
+    integer a_eq_b_count;
+    integer a_lt_b_count;
 
     integer stall_test_count;
     integer random_test_count;
 
 
     //======================================================//
-    //                      DUT                             //
+    //                     DUT                              //
     //======================================================//
 
     FSub_25519 dut (
@@ -119,15 +119,14 @@ module tb_FSub_25519;
     //            SOURCE REGISTER FILE MODEL                //
     //======================================================//
     //
-    // FADD asks for limb src_limb_o.
+    // DUT requests:
     //
-    // TB immediately selects:
+    //      src_limb_o = 0 ... 7
     //
-    //      A[src_limb_o]
-    //      B[src_limb_o]
+    // Testbench returns:
     //
-    // data_valid_i controls whether DUT is allowed to
-    // consume the selected limb.
+    //      opa_i = A[src_limb_o]
+    //      opb_i = B[src_limb_o]
     //
     //======================================================//
 
@@ -147,44 +146,58 @@ module tb_FSub_25519;
 
 
     //======================================================//
-    //              REFERENCE MODEL                         //
+    //               REFERENCE MODEL                        //
+    //======================================================//
+    //
+    // if A >= B:
+    //
+    //      R = A - B
+    //
+    // if A < B:
+    //
+    //      R = A - B + P
+    //
     //======================================================//
 
-    function automatic logic [255:0] reference_fadd (
+    function automatic logic [255:0] reference_fsub (
 
         input logic [255:0] a,
         input logic [255:0] b
 
     );
 
-        logic [256:0] full_sum;
+        logic [256:0] temp;
 
         begin
 
-            full_sum =
-                {1'b0, a}
-                +
-                {1'b0, b};
-
             //-------------------------------------//
-            // A,B < P
-            //
-            // therefore:
-            //
-            // A+B < 2P
-            //
-            // so subtract P at most once.
+            // A >= B
             //-------------------------------------//
 
-            if (full_sum >= {1'b0, FIELD_P})
+            if (a >= b) begin
 
-                reference_fadd =
-                    full_sum - {1'b0, FIELD_P};
+                reference_fsub =
+                    a - b;
 
-            else
+            end
 
-                reference_fadd =
-                    full_sum[255:0];
+            //-------------------------------------//
+            // A < B
+            //-------------------------------------//
+
+            else begin
+
+                temp =
+                    {1'b0, a}
+                    +
+                    {1'b0, FIELD_P}
+                    -
+                    {1'b0, b};
+
+                reference_fsub =
+                    temp[255:0];
+
+            end
 
         end
 
@@ -215,11 +228,13 @@ module tb_FSub_25519;
 
             };
 
+
             //-------------------------------------//
-            // X25519 field is below 2^255
+            // X25519 field element < 2^255
             //-------------------------------------//
 
             value[255] = 1'b0;
+
 
             //-------------------------------------//
             // Ensure canonical:
@@ -232,6 +247,7 @@ module tb_FSub_25519;
                 value =
                     value - FIELD_P;
 
+
             return value;
 
         end
@@ -240,7 +256,7 @@ module tb_FSub_25519;
 
 
     //======================================================//
-    //                 RESET TASK                           //
+    //                    RESET TASK                        //
     //======================================================//
 
     task automatic reset_dut;
@@ -248,69 +264,74 @@ module tb_FSub_25519;
         begin
 
             rst_ni       = 1'b0;
+
             start_i      = 1'b0;
             data_valid_i = 1'b0;
 
             operand_a_source = 256'd0;
             operand_b_source = 256'd0;
 
+
             repeat (3)
                 @(posedge clk_i);
+
 
             @(negedge clk_i);
 
             rst_ni = 1'b1;
 
+
             @(posedge clk_i);
 
             #1;
 
+
             //-------------------------------------//
-            // Reset checks
+            // Check reset state
             //-------------------------------------//
 
             if (busy_o !== 1'b0) begin
 
                 $display(
-                    "[FAIL] RESET: busy_o = %b",
+                    "[RESET FAIL] busy_o = %b",
                     busy_o
                 );
 
-                fail_count++;
-
             end
+
 
             if (done_o !== 1'b0) begin
 
                 $display(
-                    "[FAIL] RESET: done_o = %b",
+                    "[RESET FAIL] done_o = %b",
                     done_o
                 );
 
-                fail_count++;
-
             end
+
 
             if (result_valid_o !== 1'b0) begin
 
                 $display(
-                    "[FAIL] RESET: result_valid_o = %b",
+                    "[RESET FAIL] result_valid_o = %b",
                     result_valid_o
                 );
 
-                fail_count++;
-
             end
+
 
             if (result_full_o !== 256'd0) begin
 
                 $display(
-                    "[FAIL] RESET: result_full_o != 0"
+                    "[RESET FAIL] result_full_o != 0"
                 );
 
-                fail_count++;
-
             end
+
+
+            $display(
+                "[INFO] RESET complete"
+            );
 
         end
 
@@ -318,16 +339,7 @@ module tb_FSub_25519;
 
 
     //======================================================//
-    //                 SINGLE TEST                          //
-    //======================================================//
-    //
-    // max_stall:
-    //
-    //      0 -> data every cycle
-    //
-    //      N -> randomly stall 0..N cycles before
-    //           supplying each input limb
-    //
+    //                   SINGLE TEST                        //
     //======================================================//
 
     task automatic run_test (
@@ -337,24 +349,30 @@ module tb_FSub_25519;
 
         input string test_name,
 
+        // Maximum random stall cycles before
+        // each input limb
         input integer max_stall
 
     );
 
         logic [255:0] expected;
+
         logic [255:0] stream_result;
         logic [255:0] full_result_snapshot;
-
-        logic [256:0] full_sum;
 
         integer stall_cycles;
         integer output_count;
         integer timeout;
 
+        bit case_failed;
+
         begin
 
+            case_failed = 1'b0;
+
+
             //================================================//
-            //        Check test input assumption              //
+            //            CHECK INPUT RANGE                    //
             //================================================//
 
             if (a >= FIELD_P) begin
@@ -369,6 +387,7 @@ module tb_FSub_25519;
                 return;
 
             end
+
 
             if (b >= FIELD_P) begin
 
@@ -388,33 +407,28 @@ module tb_FSub_25519;
 
 
             //================================================//
-            //             Reference Result                    //
+            //              REFERENCE MODEL                    //
             //================================================//
 
             expected =
-                reference_fadd(a, b);
-
-            full_sum =
-                {1'b0, a}
-                +
-                {1'b0, b};
+                reference_fsub(a, b);
 
 
-            //-------------------------------------//
-            // Coverage classification
-            //-------------------------------------//
+            //================================================//
+            //              COVERAGE CLASS                     //
+            //================================================//
 
-            if (full_sum < {1'b0, FIELD_P})
+            if (a > b)
 
-                sum_lt_p_count++;
+                a_gt_b_count++;
 
-            else if (full_sum == {1'b0, FIELD_P})
+            else if (a == b)
 
-                sum_eq_p_count++;
+                a_eq_b_count++;
 
             else
 
-                sum_gt_p_count++;
+                a_lt_b_count++;
 
 
             if (max_stall > 0)
@@ -423,7 +437,7 @@ module tb_FSub_25519;
 
 
             //================================================//
-            //              Wait DUT IDLE                      //
+            //               WAIT UNTIL IDLE                   //
             //================================================//
 
             while (busy_o)
@@ -432,7 +446,7 @@ module tb_FSub_25519;
 
 
             //================================================//
-            //                Apply operands                   //
+            //                SET OPERANDS                      //
             //================================================//
 
             operand_a_source = a;
@@ -442,12 +456,13 @@ module tb_FSub_25519;
 
 
             //================================================//
-            //               START pulse                       //
+            //                  START                          //
             //================================================//
 
             @(negedge clk_i);
 
             start_i = 1'b1;
+
 
             @(posedge clk_i);
 
@@ -455,17 +470,17 @@ module tb_FSub_25519;
 
 
             //-------------------------------------//
-            // DUT should now be busy
+            // DUT must become busy
             //-------------------------------------//
 
             if (!busy_o) begin
 
                 $display(
-                    "[FAIL] %s : busy_o did not assert",
+                    "[ERROR] %s : busy_o did not assert",
                     test_name
                 );
 
-                fail_count++;
+                case_failed = 1'b1;
 
             end
 
@@ -476,13 +491,14 @@ module tb_FSub_25519;
 
 
             //================================================//
-            //           Send 8 input limbs                    //
+            //              SEND 8 INPUT LIMBS                 //
             //================================================//
 
             for (int limb = 0; limb < 8; limb++) begin
 
+
                 //-------------------------------------//
-                // Random input stall
+                // Random stall
                 //-------------------------------------//
 
                 if (max_stall > 0)
@@ -506,25 +522,30 @@ module tb_FSub_25519;
 
                     data_valid_i = 1'b0;
 
+
                     //---------------------------------//
-                    // DUT must keep requesting the
-                    // same limb while input is invalid
+                    // DUT must keep requesting
+                    // the same limb
                     //---------------------------------//
 
-                    if (src_limb_o !== limb[2:0]) begin
+                    if (
+                        src_limb_o
+                        !==
+                        limb[2:0]
+                    ) begin
 
                         $display(
-                            "[FAIL] %s : ",
-                            "src_limb changed during stall. ",
+                            "[ERROR] %s : src_limb changed during stall.",
                             "Expected=%0d Actual=%0d",
                             test_name,
                             limb,
                             src_limb_o
                         );
 
-                        fail_count++;
+                        case_failed = 1'b1;
 
                     end
+
 
                     @(posedge clk_i);
 
@@ -539,27 +560,35 @@ module tb_FSub_25519;
                 // Check requested limb
                 //-------------------------------------//
 
-                if (src_limb_o !== limb[2:0]) begin
+                if (
+                    src_limb_o
+                    !==
+                    limb[2:0]
+                ) begin
 
                     $display(
-                        "[FAIL] %s : ",
-                        "Wrong source limb. ",
+                        "[ERROR] %s : Wrong source limb. ",
                         "Expected=%0d Actual=%0d",
                         test_name,
                         limb,
                         src_limb_o
                     );
 
-                    fail_count++;
+                    case_failed = 1'b1;
 
                 end
 
 
                 //-------------------------------------//
-                // Supply valid A/B limb
+                // Make current limb valid
                 //-------------------------------------//
 
                 data_valid_i = 1'b1;
+
+
+                //-------------------------------------//
+                // DUT consumes limb at rising edge
+                //-------------------------------------//
 
                 @(posedge clk_i);
 
@@ -567,7 +596,7 @@ module tb_FSub_25519;
 
 
                 //-------------------------------------//
-                // Current limb consumed
+                // Remove data_valid
                 //-------------------------------------//
 
                 @(negedge clk_i);
@@ -578,7 +607,7 @@ module tb_FSub_25519;
 
 
             //================================================//
-            //         Wait for streamed result                //
+            //              CAPTURE OUTPUT                     //
             //================================================//
 
             stream_result =
@@ -620,33 +649,39 @@ module tb_FSub_25519;
 
 
                 //-------------------------------------//
-                // Capture output limb
+                // Capture streamed limb
                 //-------------------------------------//
 
                 if (result_valid_o) begin
 
+
                     //---------------------------------//
-                    // Output order must be 0 -> 7
+                    // Expected order:
+                    //
+                    // 0 -> 1 -> ... -> 7
                     //---------------------------------//
 
-                    if (dst_limb_o !== output_count[2:0]) begin
+                    if (
+                        dst_limb_o
+                        !==
+                        output_count[2:0]
+                    ) begin
 
                         $display(
-                            "[FAIL] %s : ",
-                            "Wrong dst_limb. ",
+                            "[ERROR] %s : Wrong dst_limb. ",
                             "Expected=%0d Actual=%0d",
                             test_name,
                             output_count,
                             dst_limb_o
                         );
 
-                        fail_count++;
+                        case_failed = 1'b1;
 
                     end
 
 
                     //---------------------------------//
-                    // Rebuild 256-bit stream result
+                    // Rebuild full result
                     //---------------------------------//
 
                     stream_result[
@@ -655,16 +690,23 @@ module tb_FSub_25519;
 
 
                     //---------------------------------//
-                    // result_full_o must already be
-                    // valid during ST_OUT
+                    // result_full_o should already
+                    // contain the complete answer
                     //---------------------------------//
 
-                    if (output_count == 0)
+                    if (output_count == 0) begin
 
                         full_result_snapshot =
                             result_full_o;
 
+                    end
+
                     else begin
+
+                        //---------------------------------//
+                        // It must remain stable during
+                        // all 8 output cycles
+                        //---------------------------------//
 
                         if (
                             result_full_o
@@ -673,13 +715,12 @@ module tb_FSub_25519;
                         ) begin
 
                             $display(
-                                "[FAIL] %s : ",
-                                "result_full_o changed ",
-                                "during output stream",
+                                "[ERROR] %s : result_full_o changed ",
+                                "during ST_OUT",
                                 test_name
                             );
 
-                            fail_count++;
+                            case_failed = 1'b1;
 
                         end
 
@@ -690,21 +731,25 @@ module tb_FSub_25519;
 
 
                     //---------------------------------//
-                    // done must only occur at limb 7
+                    // done_o may only assert
+                    // with final limb 7
                     //---------------------------------//
 
                     if (done_o) begin
 
-                        if (dst_limb_o !== 3'd7) begin
+                        if (
+                            dst_limb_o
+                            !==
+                            3'd7
+                        ) begin
 
                             $display(
-                                "[FAIL] %s : ",
-                                "done_o asserted before ",
+                                "[ERROR] %s : done_o asserted before ",
                                 "limb 7",
                                 test_name
                             );
 
-                            fail_count++;
+                            case_failed = 1'b1;
 
                         end
 
@@ -718,34 +763,35 @@ module tb_FSub_25519;
 
 
             //================================================//
-            //             Number of output limbs              //
+            //            OUTPUT COUNT CHECK                   //
             //================================================//
 
             if (output_count != 8) begin
 
                 $display(
-                    "[FAIL] %s : ",
-                    "Expected 8 output limbs, got %0d",
+                    "[ERROR] %s : Expected 8 output limbs, got %0d",
                     test_name,
                     output_count
                 );
 
-                fail_count++;
+                case_failed = 1'b1;
 
             end
 
 
             //================================================//
-            //             Compare full result                 //
+            //         CHECK COMPLETE 256-BIT RESULT           //
             //================================================//
 
             if (
-                result_full_o !== expected
+                result_full_o
+                !==
+                expected
             ) begin
 
                 $display("");
                 $display(
-                    "[FAIL] %s : result_full_o mismatch",
+                    "[ERROR] %s : result_full_o mismatch ",
                     test_name
                 );
 
@@ -765,26 +811,28 @@ module tb_FSub_25519;
                 );
 
                 $display(
-                    "       FULL DUT = %064h",
+                    "       DUT FULL = %064h",
                     result_full_o
                 );
 
-                fail_count++;
+                case_failed = 1'b1;
 
             end
 
 
             //================================================//
-            //          Compare streamed result                //
+            //           CHECK STREAM RESULT                   //
             //================================================//
 
-            else if (
-                stream_result !== expected
+            if (
+                stream_result
+                !==
+                expected
             ) begin
 
                 $display("");
                 $display(
-                    "[FAIL] %s : streamed result mismatch",
+                    "[ERROR] %s : streamed result mismatch",
                     test_name
                 );
 
@@ -808,16 +856,66 @@ module tb_FSub_25519;
                     stream_result
                 );
 
-                fail_count++;
+                case_failed = 1'b1;
 
             end
 
 
             //================================================//
-            //                PASS                             //
+            //        RESULT MUST BE CANONICAL                 //
             //================================================//
 
-            else begin
+            if (
+                result_full_o
+                >=
+                FIELD_P
+            ) begin
+
+                $display(
+                    "[ERROR] %s : result >= P",
+                    test_name
+                );
+
+                case_failed = 1'b1;
+
+            end
+
+
+            //================================================//
+            //       INTERNAL BORROW RELATION CHECK            //
+            //================================================//
+            //
+            // For canonical operands:
+            //
+            // A < B  -> final borrow = 1
+            // A >= B -> final borrow = 0
+            //
+            //================================================//
+
+            if (
+                dut.diff_borrow_r
+                !==
+                (a < b)
+            ) begin
+
+                $display(
+                    "[ERROR] %s : diff_borrow_r incorrect. ",
+                    "Expected=%b Actual=%b",
+                    test_name,
+                    (a < b),
+                    dut.diff_borrow_r
+                );
+
+                case_failed = 1'b1;
+
+            end
+
+
+            //================================================//
+            //          FINAL PASS / FAIL                      //
+            //================================================//
+
+            if (!case_failed) begin
 
                 pass_count++;
 
@@ -834,25 +932,20 @@ module tb_FSub_25519;
 
             end
 
-
-            //================================================//
-            //      Result must be canonical < P              //
-            //================================================//
-
-            if (result_full_o >= FIELD_P) begin
-
-                $display(
-                    "[FAIL] %s : result >= P",
-                    test_name
-                );
+            else begin
 
                 fail_count++;
+
+                $display(
+                    "[FAIL] %s",
+                    test_name
+                );
 
             end
 
 
             //================================================//
-            //           Check end of transaction              //
+            //          CHECK RETURN TO IDLE                   //
             //================================================//
 
             @(posedge clk_i);
@@ -863,11 +956,10 @@ module tb_FSub_25519;
             if (done_o !== 1'b0) begin
 
                 $display(
-                    "[FAIL] %s : done_o longer than 1 cycle",
+                    "[ERROR] %s : ",
+                    "done_o longer than one output cycle",
                     test_name
                 );
-
-                fail_count++;
 
             end
 
@@ -875,12 +967,10 @@ module tb_FSub_25519;
             if (result_valid_o !== 1'b0) begin
 
                 $display(
-                    "[FAIL] %s : ",
-                    "result_valid_o longer than expected",
+                    "[ERROR] %s : ",
+                    "result_valid_o still asserted",
                     test_name
                 );
-
-                fail_count++;
 
             end
 
@@ -888,11 +978,10 @@ module tb_FSub_25519;
             if (busy_o !== 1'b0) begin
 
                 $display(
-                    "[FAIL] %s : busy_o still high",
+                    "[ERROR] %s : ",
+                    "busy_o still asserted",
                     test_name
                 );
-
-                fail_count++;
 
             end
 
@@ -902,16 +991,17 @@ module tb_FSub_25519;
 
 
     //======================================================//
-    //                   MAIN TEST                          //
+    //                  MAIN TEST                           //
     //======================================================//
 
     initial begin
 
-        //-------------------------------------//
-        // Initialization
-        //-------------------------------------//
+        //==================================================//
+        //                 INITIALIZATION                   //
+        //==================================================//
 
         rst_ni       = 1'b0;
+
         start_i      = 1'b0;
         data_valid_i = 1'b0;
 
@@ -922,193 +1012,260 @@ module tb_FSub_25519;
         pass_count = 0;
         fail_count = 0;
 
-        sum_lt_p_count = 0;
-        sum_eq_p_count = 0;
-        sum_gt_p_count = 0;
+        a_gt_b_count = 0;
+        a_eq_b_count = 0;
+        a_lt_b_count = 0;
 
         stall_test_count = 0;
         random_test_count = 0;
 
 
         //==================================================//
-        //                  RESET                           //
+        //                    RESET                         //
         //==================================================//
 
         reset_dut();
 
 
         //==================================================//
-        //             BASIC DIRECTED TESTS                 //
-        //==================================================//
-
-        run_test(
-            256'd0,
-            256'd0,
-            "0 + 0",
-            0
-        );
-
-
-        run_test(
-            256'd1,
-            256'd0,
-            "1 + 0",
-            0
-        );
-
-
-        run_test(
-            256'd0,
-            256'd1,
-            "0 + 1",
-            0
-        );
-
-
-        run_test(
-            256'd1,
-            256'd1,
-            "1 + 1",
-            0
-        );
-
-
-        //==================================================//
-        //            MODULO BOUNDARY TESTS                 //
+        //             BASIC TEST CASES                     //
         //==================================================//
 
         //-------------------------------------//
-        // SUM = P - 1
+        // 0 - 0 = 0
+        //-------------------------------------//
+
+        run_test(
+            256'd0,
+            256'd0,
+            "0 - 0",
+            0
+        );
+
+
+        //-------------------------------------//
+        // 1 - 0 = 1
+        //-------------------------------------//
+
+        run_test(
+            256'd1,
+            256'd0,
+            "1 - 0",
+            0
+        );
+
+
+        //-------------------------------------//
+        // 1 - 1 = 0
+        //-------------------------------------//
+
+        run_test(
+            256'd1,
+            256'd1,
+            "1 - 1",
+            0
+        );
+
+
+        //-------------------------------------//
+        // A < B
         //
-        // No modulo subtraction selected
+        // 0 - 1 mod P = P - 1
+        //-------------------------------------//
+
+        run_test(
+            256'd0,
+            256'd1,
+            "0 - 1",
+            0
+        );
+
+
+        //==================================================//
+        //           CANONICAL BOUNDARY TESTS               //
+        //==================================================//
+
+        //-------------------------------------//
+        // Maximum A
+        //-------------------------------------//
+
+        run_test(
+            FIELD_P - 1,
+            256'd0,
+            "(P-1) - 0",
+            0
+        );
+
+
+        //-------------------------------------//
+        // Equal maximum operands
+        //-------------------------------------//
+
+        run_test(
+            FIELD_P - 1,
+            FIELD_P - 1,
+            "(P-1)-(P-1)",
+            0
+        );
+
+
+        //-------------------------------------//
+        // Difference = 1
+        //-------------------------------------//
+
+        run_test(
+            FIELD_P - 1,
+            FIELD_P - 2,
+            "(P-1)-(P-2)",
+            0
+        );
+
+
+        //-------------------------------------//
+        // A < B by 1
+        //
+        // Expected P - 1
         //-------------------------------------//
 
         run_test(
             FIELD_P - 2,
-            256'd1,
-            "SUM = P-1",
+            FIELD_P - 1,
+            "(P-2)-(P-1)",
             0
         );
 
 
         //-------------------------------------//
-        // SUM = P
+        // Largest negative difference:
         //
-        // Expected result = 0
+        // 0 - (P-1) mod P = 1
         //-------------------------------------//
 
         run_test(
+            256'd0,
             FIELD_P - 1,
-            256'd1,
-            "SUM = P",
-            0
-        );
-
-
-        //-------------------------------------//
-        // SUM = P + 1
-        //
-        // Expected result = 1
-        //-------------------------------------//
-
-        run_test(
-            FIELD_P - 1,
-            256'd2,
-            "SUM = P+1",
-            0
-        );
-
-
-        //-------------------------------------//
-        // Maximum possible canonical sum
-        //
-        // (P-1) + (P-1)
-        //
-        // result = P-2
-        //-------------------------------------//
-
-        run_test(
-            FIELD_P - 1,
-            FIELD_P - 1,
-            "(P-1)+(P-1)",
+            "0-(P-1)",
             0
         );
 
 
         //==================================================//
-        //              CARRY TESTS                         //
+        //              BORROW TESTS                        //
         //==================================================//
 
         //-------------------------------------//
-        // Carry limb 0 -> limb 1
+        // Borrow limb 0 -> limb 1
+        //
+        // A = 0x1_00000000
+        // B = 1
+        //
+        // Result = FFFFFFFF
         //-------------------------------------//
 
         run_test(
-            256'h00000000000000000000000000000000000000000000000000000000FFFFFFFF,
+            256'h0000000000000000000000000000000000000000000000000000000100000000,
             256'd1,
-            "carry limb0->1",
+            "borrow limb0->1",
             0
         );
 
 
         //-------------------------------------//
-        // Carry across two limbs
+        // Borrow through 64-bit boundary
         //-------------------------------------//
 
         run_test(
-            256'h000000000000000000000000000000000000000000000000FFFFFFFFFFFFFFFF,
+            256'h0000000000000000000000000000000000000000000000010000000000000000,
             256'd1,
-            "carry 64-bit",
+            "borrow 64-bit",
             0
         );
 
 
         //-------------------------------------//
-        // Carry across four limbs
+        // Borrow through 128-bit boundary
         //-------------------------------------//
 
         run_test(
-            256'h00000000000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
+            256'h0000000000000000000000000000000100000000000000000000000000000000,
             256'd1,
-            "carry 128-bit",
+            "borrow 128-bit",
             0
         );
 
 
         //-------------------------------------//
-        // Long carry chain
+        // Long borrow chain through almost
+        // the complete 256-bit datapath
         //-------------------------------------//
 
         run_test(
-            256'h00000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
+            256'h0000000100000000000000000000000000000000000000000000000000000000,
             256'd1,
-            "long carry chain",
+            "long borrow chain",
             0
         );
 
 
         //==================================================//
-        //            DATA_VALID STALL TESTS                //
+        // SPECIAL B + BORROW OVERFLOW TEST                 //
+        //==================================================//
+        //
+        // This case specifically exercises:
+        //
+        //      opb_i = FFFFFFFF
+        //      borrow_r = 1
+        //
+        // Therefore:
+        //
+        //      B + borrow
+        //
+        //      = FFFFFFFF + 1
+        //
+        //      = 1_00000000
+        //
+        // This verifies why sub_rhs_w must be 33-bit.
+        //
         //==================================================//
 
         run_test(
-            256'h0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF,
-            256'h1111111111111111111111111111111111111111111111111111111111111111,
-            "input stalls",
+            256'h000000000000000000000000000000000000000000000000FFFFFFFF00000000,
+            256'h000000000000000000000000000000000000000000000000FFFFFFFF00000001,
+            "B=FFFFFFFF + borrow",
+            0
+        );
+
+
+        //==================================================//
+        //              DATA VALID STALLS                   //
+        //==================================================//
+
+        run_test(
+            256'h123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0,
+            256'h023456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDE00,
+            "A>B with stalls",
+            4
+        );
+
+
+        run_test(
+            256'h023456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDE00,
+            256'h123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0,
+            "A<B with stalls",
             4
         );
 
 
         run_test(
             FIELD_P - 1,
-            256'd1,
-            "SUM=P with stalls",
+            FIELD_P - 1,
+            "A=B with stalls",
             5
         );
 
 
         //==================================================//
-        //                  RANDOM                          //
+        //                 RANDOM TESTS                     //
         //==================================================//
 
         for (
@@ -1120,48 +1277,54 @@ module tb_FSub_25519;
             logic [255:0] rand_a;
             logic [255:0] rand_b;
 
+
             rand_a =
                 random_field_element();
+
 
             rand_b =
                 random_field_element();
 
+
             random_test_count++;
 
-            //-------------------------------------//
-            // Random tests also use random
-            // data_valid stalls.
-            //-------------------------------------//
 
             run_test(
+
                 rand_a,
+
                 rand_b,
+
                 $sformatf(
                     "RANDOM_%0d",
                     t
                 ),
+
                 2
+
             );
 
         end
 
 
         //==================================================//
-        //                 REPORT                           //
+        //                 FINAL REPORT                     //
         //==================================================//
 
         $display("");
+
         $display(
             "============================================================"
         );
 
         $display(
-            "               X25519 FADD TEST REPORT"
+            "                X25519 FSUB TEST REPORT"
         );
 
         $display(
             "============================================================"
         );
+
 
         $display(
             "Total tests       : %0d",
@@ -1178,34 +1341,39 @@ module tb_FSub_25519;
             fail_count
         );
 
+
         $display(
             "------------------------------------------------------------"
         );
 
+
         $display(
-            "SUM < P           : %0d",
-            sum_lt_p_count
+            "A > B cases       : %0d",
+            a_gt_b_count
         );
 
         $display(
-            "SUM = P           : %0d",
-            sum_eq_p_count
+            "A = B cases       : %0d",
+            a_eq_b_count
         );
 
         $display(
-            "SUM > P           : %0d",
-            sum_gt_p_count
+            "A < B cases       : %0d",
+            a_lt_b_count
         );
+
 
         $display(
             "Tests with stalls : %0d",
             stall_test_count
         );
 
+
         $display(
             "Random tests      : %0d",
             random_test_count
         );
+
 
         $display(
             "============================================================"
@@ -1228,6 +1396,7 @@ module tb_FSub_25519;
         $display(
             "============================================================"
         );
+
 
         $finish;
 
