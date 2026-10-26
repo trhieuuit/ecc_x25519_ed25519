@@ -1,0 +1,104 @@
+# Reference — Golden Models for Unified SHA-2
+
+## 1. Mục đích
+
+Thư mục `reference/` lưu các mã nguồn SHA-256 và SHA-512 tham chiếu được sử dụng để kiểm chứng chức năng của Unified SHA-2 Core.
+
+Các golden reference đóng vai trò là **mô hình chuẩn để đối chiếu kết quả (golden models)**. Trong quá trình mô phỏng, testbench chạy golden reference song song với Unified DUT, sau đó so sánh digest đầu ra để phát hiện sai lệch trong thiết kế.
+
+Các mã nguồn này phục vụ verification, không thuộc datapath phần cứng chính của Unified SHA-2.
+
+## 2. Cấu trúc thư mục
+
+```text
+reference/
+├── README.md
+├── sha256_pkg.sv
+├── sha256_core_ref.sv
+├── sha512_core_ref.sv
+├── sha512_k_constants_ref.sv
+├── sha512_h_constants_ref.sv
+└── sha512_w_mem_ref.sv
+```
+
+*Lưu ý: Tên file thực tế có thể khác tùy theo cách tổ chức project. Các module reference SHA-512 cần được đổi tên thành hậu tố `_ref` để tránh xung đột với module được sử dụng trong DUT.*
+
+### Chức năng từng file
+
+| File | Chức năng |
+|---|---|
+| `sha256_pkg.sv` | Package chứa các định nghĩa và hằng số được SHA-256 reference sử dụng. |
+| `sha256_core_ref.sv` | SHA-256 reference core, dùng để đối chiếu kết quả với Unified DUT. |
+| `sha512_core_ref.sv` | SHA-512 reference core dựa trên Secworks, dùng để đối chiếu kết quả với Unified DUT. |
+| `sha512_k_constants_ref.sv` | Bảng hằng số K của SHA-512 reference. |
+| `sha512_h_constants_ref.sv` | Các giá trị khởi tạo IV của SHA-512 reference. |
+| `sha512_w_mem_ref.sv` | Bộ nhớ và logic mở rộng message schedule W của SHA-512 reference. |
+
+## 3. Vai trò trong verification
+
+Testbench `tb_sha2_core.sv` instantiate ba thành phần:
+
+- `sha2_core`: Unified SHA-256/SHA-512 Design Under Test (DUT).
+- `sha256_core_ref`: Golden reference cho chế độ SHA-256.
+- `sha512_core_ref`: Golden reference cho chế độ SHA-512.
+
+Quy trình kiểm chứng:
+
+```text
+                 tb_sha2_core
+                      |
+          +-----------+-----------+
+          |           |           |
+          v           v           v
+      SHA-256       Unified     SHA-512
+      Golden         DUT        Golden
+          |           |           |
+          +-----------+-----------+
+                      |
+                      v
+              Compare digests
+                      |
+              +-------+-------+
+              |               |
+             PASS            FAIL
+```
+
+Testbench kiểm tra hai loại trường hợp:
+
+1. **Single-block:** Kiểm tra SHA-256 và SHA-512 với message `"abc"` đã padding sẵn.
+2. **Multi-block:** Kiểm tra message cần hai block, bao gồm chaining state giữa các block và digest cuối cùng.
+
+Kết quả được đối chiếu giữa Unified DUT, golden reference và digest chuẩn đã biết (known-answer test vector).
+
+## 4. Vì sao cần golden reference?
+
+Golden reference giúp xác định lỗi nằm ở thiết kế Unified hay ở môi trường kiểm thử.
+
+Ví dụ:
+
+- Nếu DUT khác golden reference, cần kiểm tra datapath, hằng số, message schedule, FSM hoặc chaining logic.
+- Nếu DUT và golden cùng sai so với test vector chuẩn, cần kiểm tra dữ liệu đầu vào, padding, cách ghép block hoặc cấu hình chế độ hash.
+- Nếu cả ba kết quả khớp nhau, testcase đó đã vượt qua các kiểm tra tương ứng.
+
+Golden reference đặc biệt hữu ích khi hợp nhất hai datapath 32-bit và 64-bit thành một kiến trúc dùng chung.
+
+## 5. Quy tắc sử dụng
+
+- Giữ lại mã nguồn reference gốc để có thể truy nguyên và đối chiếu khi cần.
+- Không sửa thuật toán reference chỉ để làm cho kết quả khớp với DUT.
+- Nếu cần đổi tên module để tránh xung đột, cập nhật đồng bộ tên instance bên trong các module reference.
+- Thêm các file reference vào **Simulation Sources** trong Vivado.
+- Không đưa golden reference vào hierarchy tổng hợp của DUT.
+- Sử dụng `tb_sha2_core` làm Simulation Top và giữ `sha2_core` làm Design/Synthesis Top.
+
+Lưu ý: Việc đưa file vào Simulation Sources không tự động khiến file được instantiate. Các module reference chỉ xuất hiện trong hierarchy mô phỏng khi được testbench hoặc một module phía trên gọi đến.
+
+## 6. Phạm vi hiện tại
+
+Golden reference hiện được dùng để kiểm chứng **compression core** của Unified SHA-2 với các block đã padding sẵn.
+
+Các chức năng như message padding, streaming interface, HMAC-SHA256 và HKDF-SHA256 nằm ngoài phạm vi của thư mục này và sẽ được kiểm chứng ở các giai đoạn phát triển tiếp theo.
+
+## 7. Kết luận
+
+Thư mục `reference/` là cơ sở đối chiếu độc lập cho quá trình phát triển Unified SHA-2. Nó giúp duy trì tính đúng đắn của SHA-256 và SHA-512 trong khi kiến trúc được hợp nhất, đồng thời hỗ trợ phát hiện và khoanh vùng lỗi trước khi chuyển sang synthesis và tích hợp với EDHOC/OSCORE.
