@@ -1,0 +1,6 @@
+sha256_pkg.sv
+sha256_core_ref.sv
+sha512_k_constants_ref.sv
+sha512_h_constants_ref.sv
+sha512_w_mem_ref.sv
+sha512_core_ref.sv
