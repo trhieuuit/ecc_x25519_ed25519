@@ -1,0 +1,36 @@
+# Reference — Golden Models for Unified SHA-2
+
+Thư mục `reference/` lưu các mã nguồn SHA-256 và SHA-512 tham chiếu được sử dụng để kiểm chứng chức năng của Unified SHA-2 Core.
+
+Các golden reference đóng vai trò là **mô hình chuẩn để đối chiếu kết quả (golden models)**. Trong quá trình mô phỏng, testbench chạy golden reference song song với Unified DUT, sau đó so sánh digest đầu ra để phát hiện sai lệch trong thiết kế.
+
+Các mã nguồn này phục vụ verification, không thuộc datapath phần cứng chính của Unified SHA-2.
+
+Testbench `tb_sha2_core.sv` instantiate ba thành phần:
+
+- `sha2_core`: Unified SHA-256/SHA-512 Design Under Test (DUT).
+- `sha256_core_ref`: Golden reference cho chế độ SHA-256.
+- `sha512_core_ref`: Golden reference cho chế độ SHA-512.
+
+
+
+Testbench kiểm tra hai loại trường hợp:
+
+1. **Single-block:** Kiểm tra SHA-256 và SHA-512 với message `"abc"` đã padding sẵn.
+2. **Multi-block:** Kiểm tra message cần hai block, bao gồm chaining state giữa các block và digest cuối cùng.
+
+Kết quả được đối chiếu giữa Unified DUT, golden reference và digest chuẩn đã biết (known-answer test vector).
+
+## 4. Vì sao cần golden reference?
+
+Golden reference giúp xác định lỗi nằm ở thiết kế Unified hay ở môi trường kiểm thử.
+
+Ví dụ:
+
+- Nếu DUT khác golden reference, cần kiểm tra datapath, hằng số, message schedule, FSM hoặc chaining logic.
+- Nếu DUT và golden cùng sai so với test vector chuẩn, cần kiểm tra dữ liệu đầu vào, padding, cách ghép block hoặc cấu hình chế độ hash.
+- Nếu cả ba kết quả khớp nhau, testcase đó đã vượt qua các kiểm tra tương ứng.
+
+Golden reference đặc biệt hữu ích khi hợp nhất hai datapath 32-bit và 64-bit thành một kiến trúc dùng chung.
+
+
